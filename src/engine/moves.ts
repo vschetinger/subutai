@@ -4,6 +4,7 @@ import {
   pawnCaptureTargets,
   pawnForwardTargets,
   rayFrom,
+  toggleTopology,
 } from './auxetic';
 import type { BoardState, Color, Move, Piece, SquareId, TopologyState } from './types';
 
@@ -67,7 +68,9 @@ export function isSquareAttacked(
   }
 
   // Pawn attacks: look in the reverse capture direction to find attacking pawns
-  for (const sq of pawnCaptureTargets(square, byColor === 'white' ? 'black' : 'white', topology)) {
+  const pawnLookupColor = byColor === 'white' ? 'black' : 'white';
+  const pawnSquares = pawnCaptureTargets(square, pawnLookupColor as 'white' | 'black', topology);
+  for (const sq of pawnSquares) {
     const p = pieceAt(state, sq);
     if (p && p.color === byColor && p.type === 'pawn') return true;
   }
@@ -81,12 +84,35 @@ export function isInCheck(state: BoardState): boolean {
   return isSquareAttacked(state, kingSquare, enemyColor(state.sideToMove), state.topologyState);
 }
 
+function canEscapeViaToggle(state: BoardState): boolean {
+  const toggled = toggleTopology(state);
+  const king = findKing(toggled, state.sideToMove);
+  if (!king) return false;
+  return !isSquareAttacked(toggled, king, enemyColor(state.sideToMove), toggled.topologyState);
+}
+
 export function isCheckmate(state: BoardState): boolean {
-  return isInCheck(state) && generateLegalMoves(state).length === 0;
+  if (!isInCheck(state)) return false;
+  if (generateLegalMoves(state).length > 0) return false;
+  const toggleEscape = canEscapeViaToggle(state);
+  // #region agent log
+  if (toggleEscape) {
+    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'moves.ts:isCheckmate',message:'In check with no piece moves but rotation escapes',data:{side:state.sideToMove,topology:state.topologyState},timestamp:Date.now(),hypothesisId:'H_ROTATE_ESCAPE'})}).catch(()=>{});
+  }
+  // #endregion
+  return !toggleEscape;
 }
 
 export function isStalemate(state: BoardState): boolean {
-  return !isInCheck(state) && generateLegalMoves(state).length === 0;
+  if (isInCheck(state)) return false;
+  if (generateLegalMoves(state).length > 0) return false;
+  const toggleEscape = canEscapeViaToggle(state);
+  // #region agent log
+  if (toggleEscape) {
+    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'moves.ts:isStalemate',message:'No piece moves but rotation available (not stalemate)',data:{side:state.sideToMove,topology:state.topologyState},timestamp:Date.now(),hypothesisId:'H_ROTATE_ESCAPE'})}).catch(()=>{});
+  }
+  // #endregion
+  return !toggleEscape;
 }
 
 export function findCheckingPieces(state: BoardState): SquareId[] {
@@ -177,17 +203,42 @@ function generatePseudoLegalMoves(state: BoardState): Move[] {
   return moves;
 }
 
+let _glmLogCount = 0;
 export function generateLegalMoves(state: BoardState): Move[] {
   const pseudo = generatePseudoLegalMoves(state);
   const side = state.sideToMove;
   const opponent = enemyColor(side);
 
-  return pseudo.filter((move) => {
+  // #region agent log
+  const filtered: Array<{from?:string,to?:string,kind:string,reason:string}> = [];
+  // #endregion
+
+  const legal = pseudo.filter((move) => {
     const next = applyMove(state, move);
     const kingSquare = findKing(next, side);
-    if (!kingSquare) return false;
-    return !isSquareAttacked(next, kingSquare, opponent, next.topologyState);
+    if (!kingSquare) {
+      // #region agent log
+      filtered.push({from:move.from,to:move.to,kind:move.kind,reason:'noKing'});
+      // #endregion
+      return false;
+    }
+    const attacked = isSquareAttacked(next, kingSquare, opponent, next.topologyState);
+    if (attacked) {
+      // #region agent log
+      filtered.push({from:move.from,to:move.to,kind:move.kind,reason:`kingAt${kingSquare}Attacked`});
+      // #endregion
+    }
+    return !attacked;
   });
+
+  // #region agent log
+  _glmLogCount++;
+  if (_glmLogCount <= 60 && pseudo.length > 0 && legal.length <= 3) {
+    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'moves.ts:generateLegalMoves',message:'Low legal move count',data:{side,topology:state.topologyState,pseudoCount:pseudo.length,legalCount:legal.length,filteredSample:filtered.slice(0,10),legalMoves:legal.map(m=>({from:m.from,to:m.to,kind:m.kind}))},timestamp:Date.now(),hypothesisId:'H1,H4,H5'})}).catch(()=>{});
+  }
+  // #endregion
+
+  return legal;
 }
 
 function isPromotionRank(square: SquareId, color: Color): boolean {

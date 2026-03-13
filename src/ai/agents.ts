@@ -1,5 +1,6 @@
 import type { BoardState, Move } from '../engine';
 import { generateLegalMoves } from '../engine/moves';
+import { iterativeDeepen } from './search';
 
 export interface AgentContext {
   readonly seed?: number;
@@ -26,6 +27,14 @@ export const RandomAgent: Agent = {
     if (!moves.length) return null;
     const index = Math.floor(Math.random() * moves.length);
     return moves[index] ?? null;
+  },
+};
+
+export const SubutaiAgent: Agent = {
+  id: 'subutai',
+  name: 'Subutai',
+  async chooseMove(state: BoardState): Promise<Move | null> {
+    return iterativeDeepen(state, 800);
   },
 };
 

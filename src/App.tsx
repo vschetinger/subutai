@@ -6,11 +6,13 @@ import {
   generateLegalMoves,
   isCheckmate,
   isStalemate,
+  isInCheck,
+  isSquareAttacked,
   findKing,
   findCheckingPieces,
 } from './engine/moves';
 import { toggleTopology, computeBoardLayout, tilePixelCenter } from './engine/auxetic';
-import { RandomAgent } from './ai/agents';
+import { SubutaiAgent } from './ai/agents';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GameLog } from './recording/log';
 import { appendMove, createGameLog } from './recording/log';
@@ -63,6 +65,13 @@ function App() {
   const tileBase = boardSize / 8;
 
   function checkGameOver(nextState: BoardState) {
+    // #region agent log
+    const lm = generateLegalMoves(nextState);
+    const inChk = isCheckmate(nextState);
+    const inStale = isStalemate(nextState);
+    const kingSq = findKing(nextState, nextState.sideToMove);
+    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:checkGameOver',message:'checkGameOver called',data:{sideToMove:nextState.sideToMove,topology:nextState.topologyState,legalMoveCount:lm.length,isCheckmate:inChk,isStalemate:inStale,kingSq,pieceCount:nextState.pieces.size},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     if (isCheckmate(nextState)) {
       setGameStatus('checkmate');
     } else if (isStalemate(nextState)) {
@@ -87,7 +96,15 @@ function App() {
 
   function handleRotate() {
     if (gameStatus !== 'playing') return;
+    if (currentPlayer !== 'human') return;
+
     const next = toggleTopology(state);
+
+    const ourKing = findKing(next, state.sideToMove);
+    if (!ourKing) return;
+    const opponent = state.sideToMove === 'white' ? 'black' : 'white';
+    if (isSquareAttacked(next, ourKing, opponent as 'white' | 'black', next.topologyState)) return;
+
     setState(next);
     const nextMoves = generateLegalMoves(next);
     setLegalMoves(nextMoves);
@@ -101,21 +118,33 @@ function App() {
     checkGameOver(next);
   }
 
-  const currentPlayer = state.sideToMove === 'white' ? 'human' : 'random';
+  const currentPlayer = state.sideToMove === 'white' ? 'human' : 'ai';
 
   const scheduleAiMove = useCallback(
     (boardState: BoardState, moves: Move[]) => {
       if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
       aiTimerRef.current = setTimeout(async () => {
-        const move = await RandomAgent.chooseMove(boardState, moves);
+        const move = await SubutaiAgent.chooseMove(boardState, moves);
         if (!move) return;
-        const next = applyMove(boardState, move);
+
+        const next =
+          move.kind === 'topologyToggle'
+            ? toggleTopology(boardState)
+            : applyMove(boardState, move);
+
         setState(next);
         const nextMoves = generateLegalMoves(next);
+        // #region agent log
+        fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:scheduleAiMove',message:'AI moved, human legal moves computed',data:{aiMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,humanLegalMoves:nextMoves.length,humanMoveSample:nextMoves.slice(0,8).map(m=>({from:m.from,to:m.to,kind:m.kind})),humanSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+        // #endregion
         setLegalMoves(nextMoves);
         setSelected(null);
         setLog((prev) => appendMove(prev, move));
-        setLastMove({ from: move.from, to: move.to });
+        setLastMove(
+          move.kind === 'topologyToggle'
+            ? null
+            : { from: move.from, to: move.to },
+        );
         checkGameOver(next);
       }, 650);
     },
@@ -124,7 +153,7 @@ function App() {
 
   useEffect(() => {
     if (gameStatus !== 'playing') return;
-    if (currentPlayer !== 'random') return;
+    if (currentPlayer !== 'ai') return;
     scheduleAiMove(state, legalMoves);
     return () => {
       if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
@@ -142,12 +171,22 @@ function App() {
     return targets;
   }, [legalMoves, selected]);
 
-  const mateSquares = useMemo(() => {
-    if (gameStatus !== 'checkmate') return { king: null as string | null, checkers: new Set<string>() };
+  const checkSquares = useMemo(() => {
+    const empty = { king: null as string | null, checkers: new Set<string>() };
+    if (previewTopology && previewTopology !== state.topologyState) {
+      const toggled = toggleTopology(state);
+      const viewState: BoardState = { ...toggled, sideToMove: state.sideToMove };
+      const king = findKing(viewState, state.sideToMove);
+      if (!king) return empty;
+      const opp = state.sideToMove === 'white' ? 'black' as const : 'white' as const;
+      if (!isSquareAttacked(viewState, king, opp, viewState.topologyState)) return empty;
+      return { king, checkers: new Set<string>(findCheckingPieces(viewState)) };
+    }
+    if (!isInCheck(state)) return empty;
     const king = findKing(state, state.sideToMove);
     const checkers = new Set<string>(findCheckingPieces(state));
     return { king, checkers };
-  }, [gameStatus, state]);
+  }, [previewTopology, state]);
 
   function onSquareClick(square: string) {
     if (gameStatus !== 'playing') return;
@@ -170,6 +209,9 @@ function App() {
     const next = applyMove(state, move);
     setState(next);
     const nextMoves = generateLegalMoves(next);
+    // #region agent log
+    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:onSquareClick',message:'Human moved, AI legal moves computed',data:{humanMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,aiLegalMoves:nextMoves.length,aiSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
     setLegalMoves(nextMoves);
     setSelected(null);
     setLog((prev) => appendMove(prev, move));
@@ -184,6 +226,15 @@ function App() {
       files.map((file) => `${file}${rank}`),
     );
   }, []);
+
+  const canRotate = useMemo(() => {
+    if (currentPlayer !== 'human') return false;
+    const toggled = toggleTopology(state);
+    const king = findKing(toggled, state.sideToMove);
+    if (!king) return false;
+    const opp = state.sideToMove === 'white' ? 'black' : 'white';
+    return !isSquareAttacked(toggled, king, opp as 'white' | 'black', toggled.topologyState);
+  }, [currentPlayer, state]);
 
   const displayTopology = previewTopology ?? state.topologyState;
 
@@ -266,8 +317,8 @@ function App() {
           const isTarget = highlightedTargets.has(sq);
           const isLastFrom = lastMove?.from === sq;
           const isLastTo = lastMove?.to === sq;
-          const isMatedKing = mateSquares.king === sq;
-          const isMatingPiece = mateSquares.checkers.has(sq);
+          const isCheckedKing = checkSquares.king === sq;
+          const isCheckingPiece = checkSquares.checkers.has(sq);
 
           const { cx, cy, angle } = tilePixelCenter(
             sq as SquareId,
@@ -289,8 +340,8 @@ function App() {
                 isTarget ? 'target' : '',
                 isLastFrom ? 'last-from' : '',
                 isLastTo ? 'last-to' : '',
-                isMatedKing ? 'mated-king' : '',
-                isMatingPiece ? 'mating-piece' : '',
+                isCheckedKing ? (gameStatus === 'checkmate' ? 'mated-king' : 'checked-king') : '',
+                isCheckingPiece ? (gameStatus === 'checkmate' ? 'mating-piece' : 'checking-piece') : '',
               ]
                 .filter(Boolean)
                 .join(' ')}
@@ -338,9 +389,9 @@ function App() {
             type="button"
             className="action-btn"
             title="Preview rotation"
-            disabled={gameStatus !== 'playing'}
+            disabled={currentPlayer !== 'human'}
             onPointerEnter={() => {
-              if (gameStatus === 'playing') {
+              if (currentPlayer === 'human') {
                 setPreviewTopology(state.topologyState === 'A' ? 'B' : 'A');
               }
             }}
@@ -352,7 +403,7 @@ function App() {
             type="button"
             className="rotate-btn"
             onClick={handleRotate}
-            disabled={gameStatus !== 'playing'}
+            disabled={!canRotate}
           >
             Rotate &middot; {state.topologyState === 'A' ? 'A \u2192 B' : 'B \u2192 A'}
           </button>
@@ -386,7 +437,7 @@ function App() {
             <h2>Subutai &mdash; Auxetic Chess960</h2>
             <p>
               Subutai combines <strong>Chess960</strong> (Fischer random chess) with an
-              <strong> auxetic board</strong> that can rotate between two stable states.
+              <strong> <a href="https://www.youtube.com/shorts/RLO48ETn6LE" target="_blank"> auxetic board</a></strong> that can rotate between two stable states.
             </p>
             <p><strong>How it works:</strong></p>
             <ul>
@@ -399,7 +450,7 @@ function App() {
             </ul>
             <p>
               <a href="https://en.wikipedia.org/wiki/Fischer_random_chess" target="_blank" rel="noopener noreferrer">
-                Learn more about Chess960 on Wikipedia
+                Chess960 on Wikipedia
               </a>
             </p>
             <button type="button" className="help-close-btn" onClick={() => setShowHelp(false)}>
