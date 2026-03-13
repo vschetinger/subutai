@@ -70,7 +70,13 @@ function App() {
     const inChk = isCheckmate(nextState);
     const inStale = isStalemate(nextState);
     const kingSq = findKing(nextState, nextState.sideToMove);
-    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:checkGameOver',message:'checkGameOver called',data:{sideToMove:nextState.sideToMove,topology:nextState.topologyState,legalMoveCount:lm.length,isCheckmate:inChk,isStalemate:inStale,kingSq,pieceCount:nextState.pieces.size},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1')
+    ) {
+      fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:checkGameOver',message:'checkGameOver called',data:{sideToMove:nextState.sideToMove,topology:nextState.topologyState,legalMoveCount:lm.length,isCheckmate:inChk,isStalemate:inStale,kingSq,pieceCount:nextState.pieces.size},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    }
     // #endregion
     if (isCheckmate(nextState)) {
       setGameStatus('checkmate');
@@ -135,7 +141,13 @@ function App() {
         setState(next);
         const nextMoves = generateLegalMoves(next);
         // #region agent log
-        fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:scheduleAiMove',message:'AI moved, human legal moves computed',data:{aiMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,humanLegalMoves:nextMoves.length,humanMoveSample:nextMoves.slice(0,8).map(m=>({from:m.from,to:m.to,kind:m.kind})),humanSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+        if (
+          typeof window !== 'undefined' &&
+          (window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1')
+        ) {
+          fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:scheduleAiMove',message:'AI moved, human legal moves computed',data:{aiMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,humanLegalMoves:nextMoves.length,humanMoveSample:nextMoves.slice(0,8).map(m=>({from:m.from,to:m.to,kind:m.kind})),humanSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+        }
         // #endregion
         setLegalMoves(nextMoves);
         setSelected(null);
@@ -210,7 +222,13 @@ function App() {
     setState(next);
     const nextMoves = generateLegalMoves(next);
     // #region agent log
-    fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:onSquareClick',message:'Human moved, AI legal moves computed',data:{humanMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,aiLegalMoves:nextMoves.length,aiSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1')
+    ) {
+      fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:onSquareClick',message:'Human moved, AI legal moves computed',data:{humanMove:{kind:move.kind,from:move.from,to:move.to},topology:next.topologyState,aiLegalMoves:nextMoves.length,aiSide:nextMoves.length,aiSide:next.sideToMove},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+    }
     // #endregion
     setLegalMoves(nextMoves);
     setSelected(null);

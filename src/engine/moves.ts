@@ -96,7 +96,12 @@ export function isCheckmate(state: BoardState): boolean {
   if (generateLegalMoves(state).length > 0) return false;
   const toggleEscape = canEscapeViaToggle(state);
   // #region agent log
-  if (toggleEscape) {
+  if (
+    toggleEscape &&
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1')
+  ) {
     fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'moves.ts:isCheckmate',message:'In check with no piece moves but rotation escapes',data:{side:state.sideToMove,topology:state.topologyState},timestamp:Date.now(),hypothesisId:'H_ROTATE_ESCAPE'})}).catch(()=>{});
   }
   // #endregion
@@ -108,7 +113,12 @@ export function isStalemate(state: BoardState): boolean {
   if (generateLegalMoves(state).length > 0) return false;
   const toggleEscape = canEscapeViaToggle(state);
   // #region agent log
-  if (toggleEscape) {
+  if (
+    toggleEscape &&
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1')
+  ) {
     fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'moves.ts:isStalemate',message:'No piece moves but rotation available (not stalemate)',data:{side:state.sideToMove,topology:state.topologyState},timestamp:Date.now(),hypothesisId:'H_ROTATE_ESCAPE'})}).catch(()=>{});
   }
   // #endregion
