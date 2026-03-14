@@ -46,6 +46,7 @@ function negamax(
   beta: number,
   ply: number,
   ctx: SearchContext,
+  lastMoveWasRotation: boolean,
 ): { score: number; bestMove: Move | null } {
   ctx.nodes++;
   if ((ctx.nodes & 1023) === 0 && performance.now() > ctx.deadline) {
@@ -63,6 +64,7 @@ function negamax(
   const toggled = toggleTopology(state);
   const ourKing = findKing(toggled, state.sideToMove);
   if (
+    !lastMoveWasRotation &&
     ourKing &&
     !isSquareAttacked(toggled, ourKing, toggled.sideToMove, toggled.topologyState)
   ) {
@@ -84,7 +86,15 @@ function negamax(
     const next =
       move.kind === 'topologyToggle' ? toggled : applyMove(state, move);
 
-    const result = negamax(next, depth - 1, -beta, -alpha, ply + 1, ctx);
+    const result = negamax(
+      next,
+      depth - 1,
+      -beta,
+      -alpha,
+      ply + 1,
+      ctx,
+      move.kind === 'topologyToggle',
+    );
     const score = -result.score;
 
     if (score >= beta) return { score: beta, bestMove: move };
@@ -139,13 +149,22 @@ function quiescence(
 export function iterativeDeepen(
   state: BoardState,
   timeBudgetMs: number,
+  lastMoveWasRotation: boolean = false,
 ): Move | null {
   const deadline = performance.now() + timeBudgetMs;
   let bestMove: Move | null = null;
 
   for (let depth = 1; depth <= 6; depth++) {
     const ctx: SearchContext = { deadline, nodes: 0, cancelled: false };
-    const result = negamax(state, depth, -INF, INF, 0, ctx);
+    const result = negamax(
+      state,
+      depth,
+      -INF,
+      INF,
+      0,
+      ctx,
+      lastMoveWasRotation,
+    );
 
     if (!ctx.cancelled && result.bestMove) {
       bestMove = result.bestMove;

@@ -1,6 +1,6 @@
 import './App.css';
-import type { BoardState, Color, Move, SquareId, TopologyState } from './engine';
-import { createStartingPosition } from './engine';
+import type { BoardState, Color, Move, PieceType, SquareId, TopologyState } from './engine';
+import { createStartingPosition, createPositionFromBackRankKey, isValidChess960Key } from './engine';
 import { allSquares } from './engine/board';
 import {
   applyMove,
@@ -15,6 +15,7 @@ import {
 } from './engine/moves';
 import { toggleTopology, computeBoardLayout, tilePixelCenter } from './engine/auxetic';
 import { SubutaiAgent } from './ai/agents';
+import { PIECE_VALUE } from './ai/evaluate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GameLog } from './recording/log';
 import { appendMove, createGameLog } from './recording/log';
@@ -49,8 +50,14 @@ function App() {
   const [previewTopology, setPreviewTopology] = useState<TopologyState | null>(null);
   const [lastMove, setLastMove] = useState<{ from?: SquareId; to?: SquareId } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showMaterialPopup, setShowMaterialPopup] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThreats, setShowThreats] = useState(false);
+  const [formationLocked, setFormationLocked] = useState(false);
+  const [lockedFormationKey, setLockedFormationKey] = useState<string | null>(null);
+  const [formationInputMode, setFormationInputMode] = useState(false);
+  const [formationInputValue, setFormationInputValue] = useState('');
+  const formationInputRef = useRef<HTMLInputElement>(null);
   const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [boardSize, setBoardSize] = useState(() =>
@@ -64,6 +71,42 @@ function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (formationInputMode) formationInputRef.current?.focus();
+  }, [formationInputMode]);
+
+  function applyFormationCode() {
+    const raw = formationInputValue.trim().toUpperCase();
+    if (!raw) {
+      setFormationInputMode(false);
+      setFormationInputValue('');
+      return;
+    }
+    if (!isValidChess960Key(raw)) {
+      setFormationInputValue(raw);
+      return;
+    }
+    if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+    const initial = createPositionFromBackRankKey(raw);
+    setState(initial);
+    setInitialState(initial);
+    setSelected(null);
+    setLegalMoves(generateLegalMoves(initial));
+    setLog(createGameLog(`game-${Date.now()}`, initial, Date.now()));
+    setGameStatus('playing');
+    setPreviewTopology(null);
+    setLastMove(null);
+    setFormationLocked(true);
+    setLockedFormationKey(raw);
+    setFormationInputMode(false);
+    setFormationInputValue('');
+  }
+
+  function cancelFormationInput() {
+    setFormationInputMode(false);
+    setFormationInputValue('');
+  }
 
   const tileBase = boardSize / 8;
 
@@ -91,7 +134,10 @@ function App() {
   function startNewGame() {
     if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
     const newSeed = Date.now();
-    const initial = createStartingPosition(newSeed);
+    const initial =
+      formationLocked && lockedFormationKey
+        ? createPositionFromBackRankKey(lockedFormationKey)
+        : createStartingPosition(newSeed);
     setSeed(newSeed);
     setState(initial);
     setInitialState(initial);
@@ -101,6 +147,14 @@ function App() {
     setGameStatus('playing');
     setPreviewTopology(null);
     setLastMove(null);
+  }
+
+  function toggleFormationLock() {
+    setFormationLocked((v) => {
+      if (!v) setLockedFormationKey(backRankString(initialState));
+      else setLockedFormationKey(null);
+      return !v;
+    });
   }
 
   function handleRotate() {
@@ -130,10 +184,16 @@ function App() {
   const currentPlayer = state.sideToMove === 'white' ? 'human' : 'ai';
 
   const scheduleAiMove = useCallback(
-    (boardState: BoardState, moves: Move[]) => {
+    (
+      boardState: BoardState,
+      moves: Move[],
+      lastMoveWasRotation: boolean,
+    ) => {
       if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
       aiTimerRef.current = setTimeout(async () => {
-        const move = await SubutaiAgent.chooseMove(boardState, moves);
+        const move = await SubutaiAgent.chooseMove(boardState, moves, {
+          lastMoveWasRotation,
+        });
         if (!move) return;
 
         const next =
@@ -166,14 +226,72 @@ function App() {
     [],
   );
 
+  const lastMoveWasRotation =
+    log.moves.length > 0 &&
+    log.moves[log.moves.length - 1]?.move.kind === 'topologyToggle';
+
+  const materialBreakdown = useMemo(() => {
+    const pieceOrder: PieceType[] = ['queen', 'rook', 'bishop', 'knight', 'pawn'];
+    const white: Record<PieceType, number> = {
+      queen: 0, rook: 0, bishop: 0, knight: 0, pawn: 0, king: 0,
+    };
+    const black: Record<PieceType, number> = {
+      queen: 0, rook: 0, bishop: 0, knight: 0, pawn: 0, king: 0,
+    };
+    let whiteTotal = 0;
+    let blackTotal = 0;
+    for (const [, piece] of state.pieces) {
+      const v = PIECE_VALUE[piece.type];
+      if (piece.color === 'white') {
+        white[piece.type]++;
+        whiteTotal += v;
+      } else {
+        black[piece.type]++;
+        blackTotal += v;
+      }
+    }
+    const startCount: Record<PieceType, number> = {
+      queen: 1, rook: 2, bishop: 2, knight: 2, pawn: 8, king: 1,
+    };
+    const capturedByWhite: { type: PieceType; count: number; value: number }[] = [];
+    const capturedByBlack: { type: PieceType; count: number; value: number }[] = [];
+    let capturedByWhiteTotal = 0;
+    let capturedByBlackTotal = 0;
+    for (const type of pieceOrder) {
+      const goneFromBlack = Math.max(0, startCount[type] - black[type]);
+      if (goneFromBlack > 0) {
+        const value = goneFromBlack * PIECE_VALUE[type];
+        capturedByWhite.push({ type, count: goneFromBlack, value });
+        capturedByWhiteTotal += value;
+      }
+      const goneFromWhite = Math.max(0, startCount[type] - white[type]);
+      if (goneFromWhite > 0) {
+        const value = goneFromWhite * PIECE_VALUE[type];
+        capturedByBlack.push({ type, count: goneFromWhite, value });
+        capturedByBlackTotal += value;
+      }
+    }
+    return {
+      score: whiteTotal - blackTotal,
+      capturedByWhite,
+      capturedByBlack,
+      capturedByWhiteTotal,
+      capturedByBlackTotal,
+      whiteTotal,
+      blackTotal,
+    };
+  }, [state.pieces]);
+
+  const materialScore = materialBreakdown.score;
+
   useEffect(() => {
     if (gameStatus !== 'playing') return;
     if (currentPlayer !== 'ai') return;
-    scheduleAiMove(state, legalMoves);
+    scheduleAiMove(state, legalMoves, lastMoveWasRotation);
     return () => {
       if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
     };
-  }, [currentPlayer, state, legalMoves, gameStatus, scheduleAiMove]);
+  }, [currentPlayer, state, legalMoves, gameStatus, scheduleAiMove, lastMoveWasRotation]);
 
   const highlightedTargets = useMemo(() => {
     if (!selected) return new Set<string>();
@@ -263,12 +381,14 @@ function App() {
 
   const canRotate = useMemo(() => {
     if (currentPlayer !== 'human') return false;
+    const lastEntry = log.moves[log.moves.length - 1];
+    if (lastEntry?.move.kind === 'topologyToggle') return false;
     const toggled = toggleTopology(state);
     const king = findKing(toggled, state.sideToMove);
     if (!king) return false;
     const opp = state.sideToMove === 'white' ? 'black' : 'white';
     return !isSquareAttacked(toggled, king, opp as 'white' | 'black', toggled.topologyState);
-  }, [currentPlayer, state]);
+  }, [currentPlayer, state, log.moves]);
 
   const displayTopology = previewTopology ?? state.topologyState;
 
@@ -412,16 +532,26 @@ function App() {
       )}
 
       <div className="board-actions">
-        <button
-          type="button"
-          className="action-btn"
-          onClick={startNewGame}
-          title="New game"
-        >
-          {'\u21BB'}
-        </button>
+        <div className="action-group action-group-reset-lock">
+          <button
+            type="button"
+            className="action-btn"
+            onClick={startNewGame}
+            title="New game"
+          >
+            {'\u21BB'}
+          </button>
+          <button
+            type="button"
+            className={`action-btn${formationLocked ? ' active' : ''}`}
+            onClick={toggleFormationLock}
+            title={formationLocked ? 'Unlock formation (new games will be random)' : 'Lock formation (new game keeps this 960)'}
+          >
+            {'\u{1F512}'}
+          </button>
+        </div>
 
-        <div className="action-group">
+        <div className="action-group action-group-center">
           <button
             type="button"
             className={`action-btn${showThreats ? ' active' : ''}`}
@@ -453,7 +583,58 @@ function App() {
             Rotate &middot; {state.topologyState === 'A' ? 'A \u2192 B' : 'B \u2192 A'}
           </button>
         </div>
-
+        <div
+          className="material-score-wrap"
+          onMouseEnter={() => setShowMaterialPopup(true)}
+          onMouseLeave={() => setShowMaterialPopup(false)}
+        >
+          <span
+            className={`material-score ${materialScore > 0 ? 'positive' : materialScore < 0 ? 'negative' : 'zero'}`}
+          >
+            {materialScore > 0 ? '+' : ''}
+            {(materialScore / 100).toFixed(1)}
+          </span>
+          {showMaterialPopup && (
+            <div className="material-score-popup" role="tooltip">
+              <div className="material-captured-section">
+                <div className="material-captured-label">Captured by White</div>
+                {materialBreakdown.capturedByWhite.length === 0 ? (
+                  <div className="material-captured-list">—</div>
+                ) : (
+                  <div className="material-captured-list">
+                    {materialBreakdown.capturedByWhite
+                      .map(({ type, count, value }) => {
+                        const label = type === 'knight' ? 'N' : type[0].toUpperCase();
+                        return `${label}×${count} (${(value / 100).toFixed(1)})`;
+                      })
+                      .join(', ')}
+                    <span className="material-captured-total">
+                      {' → '}{(materialBreakdown.capturedByWhiteTotal / 100).toFixed(1)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="material-captured-section">
+                <div className="material-captured-label">Captured by Black</div>
+                {materialBreakdown.capturedByBlack.length === 0 ? (
+                  <div className="material-captured-list">—</div>
+                ) : (
+                  <div className="material-captured-list">
+                    {materialBreakdown.capturedByBlack
+                      .map(({ type, count, value }) => {
+                        const label = type === 'knight' ? 'N' : type[0].toUpperCase();
+                        return `${label}×${count} (${(value / 100).toFixed(1)})`;
+                      })
+                      .join(', ')}
+                    <span className="material-captured-total">
+                      {' → '}{(materialBreakdown.capturedByBlackTotal / 100).toFixed(1)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         <button
           type="button"
           className="action-btn"
@@ -464,7 +645,42 @@ function App() {
         </button>
       </div>
 
-      <p className="position-label">Chess960: {positionLabel}</p>
+      <div className="position-label-wrap">
+        <span className="position-label">Chess960: {positionLabel}</span>
+        {!formationInputMode ? (
+          <button
+            type="button"
+            className="position-edit-btn"
+            onDoubleClick={() => {
+              setFormationInputValue(positionLabel);
+              setFormationInputMode(true);
+            }}
+            title="Double-click to enter formation code"
+          >
+            edit
+          </button>
+        ) : (
+          <span className="position-input-wrap">
+            <input
+              ref={formationInputRef}
+              type="text"
+              className="position-input"
+              value={formationInputValue}
+              onChange={(e) => setFormationInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyFormationCode();
+                if (e.key === 'Escape') cancelFormationInput();
+              }}
+              onBlur={applyFormationCode}
+              placeholder="e.g. RQKRNBBN"
+              maxLength={8}
+            />
+            {formationInputValue && !isValidChess960Key(formationInputValue.trim().toUpperCase()) && (
+              <span className="position-input-error">Invalid 960 code</span>
+            )}
+          </span>
+        )}
+      </div>
 
       <details className="move-log-details">
         <summary>Moves ({log.moves.length})</summary>

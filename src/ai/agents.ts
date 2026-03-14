@@ -4,6 +4,8 @@ import { iterativeDeepen } from './search';
 
 export interface AgentContext {
   readonly seed?: number;
+  /** If true, the agent must not play a topology toggle (no two rotations in a row). */
+  readonly lastMoveWasRotation?: boolean;
 }
 
 export interface Agent {
@@ -33,8 +35,12 @@ export const RandomAgent: Agent = {
 export const SubutaiAgent: Agent = {
   id: 'subutai',
   name: 'Subutai',
-  async chooseMove(state: BoardState): Promise<Move | null> {
-    return iterativeDeepen(state, 800);
+  async chooseMove(
+    state: BoardState,
+    _legalMoves: readonly Move[],
+    context?: AgentContext,
+  ): Promise<Move | null> {
+    return iterativeDeepen(state, 800, context?.lastMoveWasRotation ?? false);
   },
 };
 

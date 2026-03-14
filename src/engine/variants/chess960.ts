@@ -1,5 +1,5 @@
 import { createEmptyBoardState, makePiece } from '../board';
-import type { BoardState } from '../types';
+import type { BoardState, PieceType } from '../types';
 
 function randomInt(maxExclusive: number, seed: { value: number }): number {
   const x = Math.sin(seed.value++) * 10000;
@@ -88,4 +88,52 @@ export function chess960BackRank(seedNumber = 1): BoardState {
     ...state,
     pieces,
   };
+}
+
+export function isValidChess960Key(key: string): boolean {
+  if (key.length !== 8) return false;
+  const counts = { R: 0, N: 0, B: 0, Q: 0, K: 0 };
+  const valid = new Set(['R', 'N', 'B', 'Q', 'K']);
+  for (const ch of key) {
+    if (!valid.has(ch)) return false;
+    counts[ch as keyof typeof counts]++;
+  }
+  if (counts.R !== 2 || counts.N !== 2 || counts.B !== 2 || counts.Q !== 1 || counts.K !== 1) return false;
+  const bishops = key.split('').map((c, i) => (c === 'B' ? i : -1)).filter((i) => i >= 0);
+  if ((bishops[0]! % 2) === (bishops[1]! % 2)) return false;
+  const rookKing = key.split('').map((c, i) => (c === 'R' || c === 'K' ? [c, i] as const : null)).filter(Boolean) as [string, number][];
+  const order = rookKing.map(([c]) => c).join('');
+  if (order !== 'RKR') return false;
+  return true;
+}
+
+export function chess960FromBackRankKey(key: string): BoardState {
+  if (!isValidChess960Key(key)) {
+    throw new Error(`Invalid Chess960 key: "${key}"`);
+  }
+  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
+  const state = createEmptyBoardState('white');
+  const pieces = new Map(state.pieces);
+
+  const charToType = (ch: string): PieceType => {
+    switch (ch) {
+      case 'R': return 'rook';
+      case 'N': return 'knight';
+      case 'B': return 'bishop';
+      case 'Q': return 'queen';
+      case 'K': return 'king';
+      default: return 'rook';
+    }
+  };
+
+  files.forEach((file, index) => {
+    const letter = key[index]!;
+    const type = charToType(letter);
+    pieces.set(`${file}1`, makePiece('white', type));
+    pieces.set(`${file}2`, makePiece('white', 'pawn'));
+    pieces.set(`${file}7`, makePiece('black', 'pawn'));
+    pieces.set(`${file}8`, makePiece('black', type));
+  });
+
+  return { ...state, pieces };
 }
