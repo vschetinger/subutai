@@ -20,6 +20,9 @@ import { PIECE_VALUE } from './ai/evaluate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GameLog } from './recording/log';
 import { appendMove, createGameLog } from './recording/log';
+import { buildSavedGame } from './memory/build';
+import { localStorageAdapter } from './memory/storage';
+import { MemoryPanel } from './memory/MemoryPanel';
 
 type GameStatus = 'playing' | 'checkmate' | 'stalemate';
 
@@ -64,6 +67,7 @@ function App() {
   const [formationInputValue, setFormationInputValue] = useState('');
   const formationInputRef = useRef<HTMLInputElement>(null);
   const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedForLogIdRef = useRef<string | null>(null);
 
   const [boardSize, setBoardSize] = useState(() =>
     Math.min(window.innerWidth - 32, 520),
@@ -80,6 +84,15 @@ function App() {
   useEffect(() => {
     if (formationInputMode) formationInputRef.current?.focus();
   }, [formationInputMode]);
+
+  useEffect(() => {
+    if (gameStatus !== 'checkmate' && gameStatus !== 'stalemate') return;
+    if (log.moves.length === 0) return;
+    if (savedForLogIdRef.current === log.id) return;
+    const saved = buildSavedGame(log, state, gameStatus);
+    localStorageAdapter.saveGame(saved);
+    savedForLogIdRef.current = log.id;
+  }, [gameStatus, log, state]);
 
   function applyFormationCode() {
     const raw = formationInputValue.trim().toUpperCase();
@@ -149,6 +162,7 @@ function App() {
     setSelected(null);
     setLegalMoves(generateLegalMoves(initial));
     setLog(createGameLog(`game-${newSeed}`, initial, newSeed));
+    savedForLogIdRef.current = null;
     setGameStatus('playing');
     setPreviewTopology(null);
     setLastMove(null);
@@ -180,7 +194,7 @@ function App() {
     setPreviewTopology(null);
 
     const toggleMove: Move = { kind: 'topologyToggle' };
-    setLog((prev) => appendMove(prev, toggleMove));
+    setLog((prev) => appendMove(prev, toggleMove, undefined, state.topologyState));
     setLastMove(null);
 
     checkGameOver(next, true);
@@ -219,7 +233,7 @@ function App() {
         // #endregion
         setLegalMoves(nextMoves);
         setSelected(null);
-        setLog((prev) => appendMove(prev, move));
+        setLog((prev) => appendMove(prev, move, undefined, boardState.topologyState));
         setLastMove(
           move.kind === 'topologyToggle'
             ? null
@@ -402,7 +416,7 @@ function App() {
     // #endregion
     setLegalMoves(nextMoves);
     setSelected(null);
-    setLog((prev) => appendMove(prev, move));
+    setLog((prev) => appendMove(prev, move, undefined, state.topologyState));
     setLastMove({ from: move.from, to: move.to });
     checkGameOver(next);
   }
@@ -837,6 +851,8 @@ function App() {
           </button>
         </div>
       </details>
+
+      <MemoryPanel />
 
       {showHelp && (
         <div className="help-backdrop" onClick={() => setShowHelp(false)}>

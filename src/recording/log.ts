@@ -3,6 +3,7 @@ import type { BoardState, Move, TopologyState } from '../engine';
 export interface LoggedMove {
   readonly san?: string;
   readonly move: Move;
+  readonly topology?: TopologyState;
 }
 
 export interface GameLog {
@@ -33,9 +34,10 @@ export function appendMove(
   log: GameLog,
   move: Move,
   san?: string,
+  topology?: TopologyState,
 ): GameLog {
   return {
     ...log,
-    moves: [...log.moves, { san, move }],
+    moves: [...log.moves, { san, move, topology }],
   };
 }
