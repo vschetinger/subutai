@@ -10,6 +10,7 @@ import {
   isInCheck,
   isSquareAttacked,
   countAttackers,
+  getAttackerSquares,
   findKing,
   findCheckingPieces,
 } from './engine/moves';
@@ -53,6 +54,10 @@ function App() {
   const [showMaterialPopup, setShowMaterialPopup] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThreats, setShowThreats] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
+  const [previewLocked, setPreviewLocked] = useState(false);
+  const [lockedPreviewTopology, setLockedPreviewTopology] = useState<TopologyState | null>(null);
+  const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
   const [formationLocked, setFormationLocked] = useState(false);
   const [lockedFormationKey, setLockedFormationKey] = useState<string | null>(null);
   const [formationInputMode, setFormationInputMode] = useState(false);
@@ -110,11 +115,11 @@ function App() {
 
   const tileBase = boardSize / 8;
 
-  function checkGameOver(nextState: BoardState) {
+  function checkGameOver(nextState: BoardState, lastMoveWasRotation: boolean = false) {
     // #region agent log
     const lm = generateLegalMoves(nextState);
-    const inChk = isCheckmate(nextState);
-    const inStale = isStalemate(nextState);
+    const inChk = isCheckmate(nextState, lastMoveWasRotation);
+    const inStale = isStalemate(nextState, lastMoveWasRotation);
     const kingSq = findKing(nextState, nextState.sideToMove);
     if (
       typeof window !== 'undefined' &&
@@ -124,9 +129,9 @@ function App() {
       fetch('http://127.0.0.1:7519/ingest/37bd3e22-11f2-45c3-b325-8dbcf69a5172',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'389750'},body:JSON.stringify({sessionId:'389750',location:'App.tsx:checkGameOver',message:'checkGameOver called',data:{sideToMove:nextState.sideToMove,topology:nextState.topologyState,legalMoveCount:lm.length,isCheckmate:inChk,isStalemate:inStale,kingSq,pieceCount:nextState.pieces.size},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
     }
     // #endregion
-    if (isCheckmate(nextState)) {
+    if (isCheckmate(nextState, lastMoveWasRotation)) {
       setGameStatus('checkmate');
-    } else if (isStalemate(nextState)) {
+    } else if (isStalemate(nextState, lastMoveWasRotation)) {
       setGameStatus('stalemate');
     }
   }
@@ -178,7 +183,7 @@ function App() {
     setLog((prev) => appendMove(prev, toggleMove));
     setLastMove(null);
 
-    checkGameOver(next);
+    checkGameOver(next, true);
   }
 
   const currentPlayer = state.sideToMove === 'white' ? 'human' : 'ai';
@@ -220,7 +225,7 @@ function App() {
             ? null
             : { from: move.from, to: move.to },
         );
-        checkGameOver(next);
+        checkGameOver(next, move.kind === 'topologyToggle');
       }, 650);
     },
     [],
@@ -321,18 +326,49 @@ function App() {
     return { king, checkers };
   }, [previewTopology, state]);
 
+  const displayTopology =
+    previewLocked && lockedPreviewTopology
+      ? lockedPreviewTopology
+      : (previewTopology ?? state.topologyState);
+
   const threatenedSquares = useMemo(() => {
     if (!showThreats) return new Map<string, number>();
     const opp: Color = state.sideToMove === 'white' ? 'black' : 'white';
-    const topo = previewTopology ?? state.topologyState;
-    const analyzeState: BoardState = { ...state, topologyState: topo };
+    const analyzeState: BoardState = { ...state, topologyState: displayTopology };
     const counts = new Map<string, number>();
     for (const sq of allSquares) {
-      const c = countAttackers(analyzeState, sq, opp, topo);
+      const c = countAttackers(analyzeState, sq, opp, displayTopology);
       if (c > 0) counts.set(sq, c);
     }
     return counts;
-  }, [showThreats, state, previewTopology]);
+  }, [showThreats, state, displayTopology]);
+
+  const supportPairs = useMemo((): [SquareId, SquareId][] => {
+    if (!showSupport) return [];
+    const ourColor: Color = 'white';
+    const pairs: [SquareId, SquareId][] = [];
+    for (const to of allSquares) {
+      const piece = state.pieces.get(to);
+      if (!piece || piece.color !== ourColor) continue;
+      const attackers = getAttackerSquares(state, to, ourColor, displayTopology);
+      for (const from of attackers) {
+        if (from !== to) pairs.push([from, to]);
+      }
+    }
+    return pairs;
+  }, [showSupport, state, displayTopology]);
+
+  const threateningPieceSquares = useMemo(() => {
+    if (!showThreats || !hoveredSquare || !threatenedSquares.has(hoveredSquare)) return new Set<string>();
+    const opp: Color = state.sideToMove === 'white' ? 'black' : 'white';
+    const attackers = getAttackerSquares(state, hoveredSquare as SquareId, opp, displayTopology);
+    return new Set(attackers);
+  }, [showThreats, hoveredSquare, threatenedSquares, state, displayTopology]);
+
+  const hoverSupporters = useMemo((): SquareId[] => {
+    if (!showSupport || !selected || !hoveredSquare) return [];
+    return getAttackerSquares(state, hoveredSquare as SquareId, 'white', displayTopology);
+  }, [showSupport, selected, hoveredSquare, state, displayTopology]);
 
   function onSquareClick(square: string) {
     if (gameStatus !== 'playing') return;
@@ -389,8 +425,6 @@ function App() {
     const opp = state.sideToMove === 'white' ? 'black' : 'white';
     return !isSquareAttacked(toggled, king, opp as 'white' | 'black', toggled.topologyState);
   }, [currentPlayer, state, log.moves]);
-
-  const displayTopology = previewTopology ?? state.topologyState;
 
   const layout = useMemo(
     () => computeBoardLayout(displayTopology, boardSize),
@@ -457,7 +491,7 @@ function App() {
       </header>
 
       <div
-        className={`board${previewTopology ? ' previewing' : ''}`}
+        className={`board${previewTopology || previewLocked ? ' previewing' : ''}`}
         style={{ width: boardSize, height: boardSize }}
       >
         {squares.map((sq) => {
@@ -474,6 +508,7 @@ function App() {
           const isCheckedKing = checkSquares.king === sq;
           const isCheckingPiece = checkSquares.checkers.has(sq);
           const threatCount = threatenedSquares.get(sq) ?? 0;
+          const isThreateningPiece = threateningPieceSquares.has(sq);
 
           const { cx, cy, angle } = tilePixelCenter(
             sq as SquareId,
@@ -498,6 +533,7 @@ function App() {
                 isCheckedKing ? (gameStatus === 'checkmate' ? 'mated-king' : 'checked-king') : '',
                 isCheckingPiece ? (gameStatus === 'checkmate' ? 'mating-piece' : 'checking-piece') : '',
                 threatCount > 0 ? 'threatened' : '',
+                isThreateningPiece ? 'threatening-piece' : '',
               ]
                 .filter(Boolean)
                 .join(' ')}
@@ -508,6 +544,8 @@ function App() {
                 ...(threatCount > 0 ? { '--threat-n': threatCount } as React.CSSProperties : {}),
               }}
               onClick={() => onSquareClick(sq)}
+              onMouseEnter={() => setHoveredSquare(sq)}
+              onMouseLeave={() => setHoveredSquare(null)}
             >
               {piece ? (
                 <span
@@ -525,6 +563,92 @@ function App() {
             </button>
           );
         })}
+        {showSupport && (
+          <svg
+            className="support-overlay"
+            width={boardSize}
+            height={boardSize}
+            style={{ pointerEvents: 'none' }}
+          >
+            <defs>
+              <marker
+                id="support-arrowhead"
+                markerWidth="4"
+                markerHeight="2.5"
+                refX="3.5"
+                refY="1.25"
+                orient="auto"
+              >
+                <path
+                  d="M 0 0 L 3.5 1.25 L 0 2.5"
+                  fill="none"
+                  stroke="var(--support-stroke, #14b8a6)"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+              </marker>
+              <marker
+                id="support-arrowhead-orange"
+                markerWidth="4"
+                markerHeight="2.5"
+                refX="3.5"
+                refY="1.25"
+                orient="auto"
+              >
+                <path
+                  d="M 0 0 L 3.5 1.25 L 0 2.5"
+                  fill="none"
+                  stroke="var(--support-hover-stroke, #ea580c)"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+              </marker>
+            </defs>
+            {supportPairs.map(([from, to], i) => {
+              const fromCenter = tilePixelCenter(from, displayTopology, layout);
+              const toCenter = tilePixelCenter(to, displayTopology, layout);
+              const dx = toCenter.cx - fromCenter.cx;
+              const dy = toCenter.cy - fromCenter.cy;
+              const dist = Math.hypot(dx, dy) || 1;
+              const inset = tileBase * 0.4;
+              const endX = toCenter.cx - (dx / dist) * inset;
+              const endY = toCenter.cy - (dy / dist) * inset;
+              return (
+                <line
+                  key={`${from}-${to}-${i}`}
+                  x1={fromCenter.cx}
+                  y1={fromCenter.cy}
+                  x2={endX}
+                  y2={endY}
+                  className="support-arrow"
+                  markerEnd="url(#support-arrowhead)"
+                />
+              );
+            })}
+            {hoveredSquare && hoverSupporters.map((fromSq) => {
+              const toSq = hoveredSquare as SquareId;
+              const fromCenter = tilePixelCenter(fromSq, displayTopology, layout);
+              const toCenter = tilePixelCenter(toSq, displayTopology, layout);
+              const dx = toCenter.cx - fromCenter.cx;
+              const dy = toCenter.cy - fromCenter.cy;
+              const dist = Math.hypot(dx, dy) || 1;
+              const inset = tileBase * 0.4;
+              const endX = toCenter.cx - (dx / dist) * inset;
+              const endY = toCenter.cy - (dy / dist) * inset;
+              return (
+                <line
+                  key={`hover-${fromSq}-${toSq}`}
+                  x1={fromCenter.cx}
+                  y1={fromCenter.cy}
+                  x2={endX}
+                  y2={endY}
+                  className="support-arrow support-arrow-hover"
+                  markerEnd="url(#support-arrowhead-orange)"
+                />
+              );
+            })}
+          </svg>
+        )}
       </div>
 
       {gameOverMessage && (
@@ -552,25 +676,47 @@ function App() {
         </div>
 
         <div className="action-group action-group-center">
+          <div className="action-group action-group-support-threat">
+            <button
+              type="button"
+              className={`action-btn${showSupport ? ' active' : ''}`}
+              title="Toggle support map (who backs up whom)"
+              onClick={() => setShowSupport((v) => !v)}
+            >
+              {'\u27A1'}
+            </button>
+            <button
+              type="button"
+              className={`action-btn${showThreats ? ' active' : ''}`}
+              title="Toggle threat map"
+              onClick={() => setShowThreats((v) => !v)}
+            >
+              {'\u26A0'}
+            </button>
+          </div>
           <button
             type="button"
-            className={`action-btn${showThreats ? ' active' : ''}`}
-            title="Toggle threat map"
-            onClick={() => setShowThreats((v) => !v)}
-          >
-            {'\u26A0'}
-          </button>
-          <button
-            type="button"
-            className="action-btn preview-btn"
-            title="Preview rotation"
+            className={`action-btn preview-btn${previewLocked ? ' active' : ''}`}
+            title={previewLocked ? 'Unlock rotation preview' : 'Preview rotation (click to lock)'}
             disabled={currentPlayer !== 'human'}
+            onClick={() => {
+              if (currentPlayer !== 'human') return;
+              if (previewLocked) {
+                setPreviewLocked(false);
+                setLockedPreviewTopology(null);
+              } else {
+                setPreviewLocked(true);
+                setLockedPreviewTopology(state.topologyState === 'A' ? 'B' : 'A');
+              }
+            }}
             onPointerEnter={() => {
-              if (currentPlayer === 'human') {
+              if (currentPlayer === 'human' && !previewLocked) {
                 setPreviewTopology(state.topologyState === 'A' ? 'B' : 'A');
               }
             }}
-            onPointerLeave={() => setPreviewTopology(null)}
+            onPointerLeave={() => {
+              if (!previewLocked) setPreviewTopology(null);
+            }}
           >
             {'\u{1F441}'}
           </button>
@@ -705,7 +851,10 @@ function App() {
               <li>The board is divided into 4&times;4 blocks of 2&times;2 squares.</li>
               <li>Pressing <em>Rotate</em> flips all blocks &plusmn;90&deg;, reshuffling
                 which squares are adjacent. This <strong>costs your turn</strong>.</li>
-              <li>Hover the eye button to preview the rotation without committing.</li>
+              <li>Hover the eye button to preview the rotation; <strong>click</strong> the eye to
+                temporarily lock the rotated view for inspection (click again to unlock). This is not the move.</li>
+              <li><em>Support map</em> (arrow button): shows which of your pieces are backed up by others (arrows from supporter to supported).</li>
+              <li><em>Threat map</em> (warning button): tints squares the opponent attacks. Hover a threatened square to highlight the threatening pieces.</li>
               <li>The starting position is a random Chess960 arrangement.</li>
               <li>Standard chess rules apply: you cannot move into check, checkmate ends the game.</li>
             </ul>

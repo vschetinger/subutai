@@ -98,6 +98,29 @@
   background: rgba(220, 38, 38, calc(0.08 * var(--threat-n, 1)));
 }
 
+.tile.threatening-piece::before {
+  box-shadow: inset 0 0 0 3px rgba(220, 38, 38, 0.9), 0 0 12px rgba(220, 38, 38, 0.5);
+}
+
+/* Support overlay */
+.support-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.support-arrow {
+  stroke: var(--support-stroke, #14b8a6);
+  stroke-width: 1.8;
+  fill: none;
+  opacity: 0.85;
+}
+
+.support-arrow-hover {
+  stroke: var(--support-hover-stroke, #ea580c);
+}
+
 /* Pieces */
 
 .piece {
@@ -171,6 +194,20 @@
 }
 
 .action-group-reset-lock .action-btn:last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.action-group-support-threat {
+  gap: 0;
+}
+
+.action-group-support-threat .action-btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.action-group-support-threat .action-btn:last-child {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
