@@ -14,8 +14,10 @@ function sortGames(games: SavedGame[], key: SortKey, dir: SortDir): SavedGame[] 
           a.createdAt.localeCompare(b.createdAt)
       : key === 'result'
         ? (a: SavedGame, b: SavedGame) => {
-            const order = { win: 0, loss: 1, draw: 2 };
-            return order[a.result] - order[b.result];
+            const order: Record<string, number> = { win: 0, loss: 1, draw: 2 };
+            const ar = a.result ?? 'draw';
+            const br = b.result ?? 'draw';
+            return order[ar] - order[br];
           }
         : key === 'config960'
           ? (a: SavedGame, b: SavedGame) =>
@@ -25,7 +27,11 @@ function sortGames(games: SavedGame[], key: SortKey, dir: SortDir): SavedGame[] 
   return dir === 'desc' ? sorted.reverse() : sorted;
 }
 
-export function MemoryPanel() {
+export function MemoryPanel({
+  onGameActivate,
+}: {
+  onGameActivate?: (game: SavedGame) => void;
+}) {
   const [games, setGames] = useState<SavedGame[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -105,7 +111,15 @@ export function MemoryPanel() {
                 : 'No games match the filter.'}
             </div>
           ) : (
-            sorted.map((game) => <GameCard key={game.id} game={game} />)
+            sorted.map((game) => (
+              <div
+                key={game.id}
+                className="memory-game-row"
+                onDoubleClick={() => onGameActivate?.(game)}
+              >
+                <GameCard game={game} />
+              </div>
+            ))
           )}
         </div>
       </div>

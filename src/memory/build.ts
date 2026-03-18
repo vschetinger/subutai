@@ -60,21 +60,17 @@ function buildNotation(log: GameLog, config960: string): string {
   return lines.join('\n');
 }
 
-export function buildSavedGame(
+function buildBaseFromLog(
   log: GameLog,
-  finalState: BoardState,
-  termination: 'checkmate' | 'stalemate',
-): SavedGame {
+): {
+  config960: string;
+  movesInA: number;
+  movesInB: number;
+  scoreHistory: number[];
+  moves: SavedGame['moves'];
+  notation: string;
+} {
   const config960 = backRankString(log.initialState);
-  const humanIsWhite = true;
-  const winner = termination === 'checkmate'
-    ? (finalState.sideToMove === 'white' ? 'black' : 'white')
-    : null;
-  const result: 'win' | 'loss' | 'draw' =
-    termination === 'stalemate' ? 'draw'
-    : winner === 'white' ? (humanIsWhite ? 'win' : 'loss')
-    : (humanIsWhite ? 'loss' : 'win');
-
   let movesInA = 0;
   let movesInB = 0;
   let topo = log.initialTopology;
@@ -103,16 +99,73 @@ export function buildSavedGame(
   }));
 
   return {
-    id: `${log.id}-${Date.now()}`,
-    createdAt: log.createdAt,
     config960,
-    result,
-    termination,
-    moveCount: log.moves.length,
-    moves,
     movesInA,
     movesInB,
     scoreHistory,
+    moves,
     notation: buildNotation(log, config960),
   };
+}
+
+export function buildSavedGameFromLog(
+  log: GameLog,
+  finalState: BoardState,
+  termination: 'checkmate' | 'stalemate',
+  sourceGameId?: string,
+): SavedGame {
+  const base = buildBaseFromLog(log);
+
+  const humanIsWhite = true;
+  const winner = termination === 'checkmate'
+    ? (finalState.sideToMove === 'white' ? 'black' : 'white')
+    : null;
+  const result: 'win' | 'loss' | 'draw' =
+    termination === 'stalemate' ? 'draw'
+    : winner === 'white' ? (humanIsWhite ? 'win' : 'loss')
+    : (humanIsWhite ? 'loss' : 'win');
+
+  return {
+    id: `${log.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: log.createdAt,
+    status: 'complete',
+    result,
+    termination,
+    moveCount: log.moves.length,
+    moves: base.moves,
+    movesInA: base.movesInA,
+    movesInB: base.movesInB,
+    scoreHistory: base.scoreHistory,
+    notation: base.notation,
+    config960: base.config960,
+    sourceGameId,
+  };
+}
+
+export function buildSavedGameSnapshot(
+  log: GameLog,
+  id: string,
+): SavedGame {
+  const base = buildBaseFromLog(log);
+  return {
+    id,
+    createdAt: log.createdAt,
+    status: 'incomplete',
+    moveCount: log.moves.length,
+    moves: base.moves,
+    movesInA: base.movesInA,
+    movesInB: base.movesInB,
+    scoreHistory: base.scoreHistory,
+    notation: base.notation,
+    config960: base.config960,
+  };
+}
+
+// Backwards-compatible wrapper for existing callers.
+export function buildSavedGame(
+  log: GameLog,
+  finalState: BoardState,
+  termination: 'checkmate' | 'stalemate',
+): SavedGame {
+  return buildSavedGameFromLog(log, finalState, termination);
 }

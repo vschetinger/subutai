@@ -20,9 +20,11 @@ import { PIECE_VALUE } from './ai/evaluate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GameLog } from './recording/log';
 import { appendMove, createGameLog } from './recording/log';
-import { buildSavedGame } from './memory/build';
+import { buildSavedGameFromLog, buildSavedGameSnapshot } from './memory/build';
 import { localStorageAdapter } from './memory/storage';
 import { MemoryPanel } from './memory/MemoryPanel';
+import type { SavedGame } from './memory/types';
+import { NotationParseError, parseMemoryNotation } from './memory/notation';
 
 type GameStatus = 'playing' | 'checkmate' | 'stalemate';
 
@@ -65,9 +67,15 @@ function App() {
   const [lockedFormationKey, setLockedFormationKey] = useState<string | null>(null);
   const [formationInputMode, setFormationInputMode] = useState(false);
   const [formationInputValue, setFormationInputValue] = useState('');
+  const [showReplayDialog, setShowReplayDialog] = useState(false);
+  const [replayText, setReplayText] = useState('');
+  const [replayError, setReplayError] = useState<string | null>(null);
   const formationInputRef = useRef<HTMLInputElement>(null);
   const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedForLogIdRef = useRef<string | null>(null);
+  const liveSavedGameIdRef = useRef<string>(
+    `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  );
 
   const [boardSize, setBoardSize] = useState(() =>
     Math.min(window.innerWidth - 32, 520),
@@ -89,10 +97,27 @@ function App() {
     if (gameStatus !== 'checkmate' && gameStatus !== 'stalemate') return;
     if (log.moves.length === 0) return;
     if (savedForLogIdRef.current === log.id) return;
-    const saved = buildSavedGame(log, state, gameStatus);
-    localStorageAdapter.saveGame(saved);
+
+    const sourceId = liveSavedGameIdRef.current;
+    const saved = buildSavedGameFromLog(log, state, gameStatus, sourceId);
+    (localStorageAdapter.saveOrUpdateGame?.(saved) ?? localStorageAdapter.saveGame(saved));
+
+    // Clean up the live snapshot so Memory shows one final entry.
+    if (sourceId) {
+      localStorageAdapter.deleteGame?.(sourceId);
+    }
+
     savedForLogIdRef.current = log.id;
   }, [gameStatus, log, state]);
+
+  useEffect(() => {
+    if (gameStatus !== 'playing') return;
+    if (log.moves.length === 0) return;
+    const liveId = liveSavedGameIdRef.current;
+    if (!liveId) return;
+    const snapshot = buildSavedGameSnapshot(log, liveId);
+    (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
+  }, [gameStatus, log]);
 
   function applyFormationCode() {
     const raw = formationInputValue.trim().toUpperCase();
@@ -119,6 +144,9 @@ function App() {
     setLockedFormationKey(raw);
     setFormationInputMode(false);
     setFormationInputValue('');
+
+    // New play session => new live snapshot id.
+    liveSavedGameIdRef.current = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function cancelFormationInput() {
@@ -166,6 +194,9 @@ function App() {
     setGameStatus('playing');
     setPreviewTopology(null);
     setLastMove(null);
+
+    // New play session => new live snapshot id.
+    liveSavedGameIdRef.current = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function toggleFormationLock() {
@@ -448,6 +479,90 @@ function App() {
   const scale = layout.tileSize / tileBase;
 
   const positionLabel = backRankString(initialState);
+
+  function resumeGame(game: SavedGame) {
+    const initial = createPositionFromBackRankKey(game.config960);
+    let current: BoardState = initial;
+    let nextLog: GameLog = createGameLog(`resume-${Date.now()}`, initial, Date.now());
+
+    for (const entry of game.moves) {
+      const mv = entry.move;
+      if (mv.kind === 'topologyToggle') {
+        current = toggleTopology(current);
+        nextLog = appendMove(nextLog, mv, undefined, entry.topology);
+        continue;
+      }
+      if (!mv.from || !mv.to) continue;
+      current = applyMove(current, mv);
+      nextLog = appendMove(nextLog, mv, undefined, entry.topology);
+    }
+
+    if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+    setState(current);
+    setInitialState(initial);
+    setSelected(null);
+    setLegalMoves(generateLegalMoves(current));
+    setLog(nextLog);
+    setGameStatus('playing');
+    setPreviewTopology(null);
+    setLastMove(null);
+    setFormationLocked(true);
+    setLockedFormationKey(game.config960);
+    savedForLogIdRef.current = null;
+    liveSavedGameIdRef.current = game.id;
+  }
+
+  function importReplayFromNotation() {
+    try {
+      const parsed = parseMemoryNotation(replayText);
+      const initial = createPositionFromBackRankKey(parsed.config960);
+      let current: BoardState = initial;
+      let replayLog: GameLog = createGameLog(`replay-${Date.now()}`, initial, Date.now());
+
+      for (const mv of parsed.moves) {
+        if (mv.kind === 'topologyToggle') {
+          const topoBefore = current.topologyState;
+          current = toggleTopology(current);
+          replayLog = appendMove(replayLog, mv, undefined, topoBefore);
+        } else if (mv.from && mv.to) {
+          if (!current.pieces.get(mv.from)) {
+            throw new NotationParseError(`Illegal move: no piece on ${mv.from}.`);
+          }
+          const topoBefore = current.topologyState;
+          current = applyMove(current, mv);
+          replayLog = appendMove(replayLog, mv, undefined, topoBefore);
+        }
+      }
+
+      const id = `replay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const snapshot = buildSavedGameSnapshot(replayLog, id);
+      (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
+
+      // Load into the board as an unfinished game so it can be continued.
+      liveSavedGameIdRef.current = id;
+      setFormationLocked(true);
+      setLockedFormationKey(parsed.config960);
+      setInitialState(initial);
+      setState(current);
+      setSelected(null);
+      setLegalMoves(generateLegalMoves(current));
+      setLog(replayLog);
+      setGameStatus('playing');
+      setPreviewTopology(null);
+      setLastMove(null);
+      savedForLogIdRef.current = null;
+
+      setReplayError(null);
+      setShowReplayDialog(false);
+      setReplayText('');
+    } catch (e) {
+      if (e instanceof NotationParseError) {
+        setReplayError(e.message);
+      } else {
+        setReplayError('Could not parse replay log.');
+      }
+    }
+  }
 
   // Notation string for copy
   const notationString = useMemo(() => {
@@ -806,6 +921,17 @@ function App() {
       </div>
 
       <div className="position-label-wrap">
+        <button
+          type="button"
+          className="position-replay-btn"
+          onClick={() => {
+            setReplayError(null);
+            setShowReplayDialog(true);
+          }}
+          title="Paste a move log to replay"
+        >
+          Replay
+        </button>
         <span className="position-label">Chess960: {positionLabel}</span>
         {!formationInputMode ? (
           <button
@@ -842,6 +968,35 @@ function App() {
         )}
       </div>
 
+      {showReplayDialog && (
+        <div className="help-backdrop" onClick={() => setShowReplayDialog(false)}>
+          <div className="help-dialog" onClick={(e) => e.stopPropagation()}>
+            <h2>Replay from log</h2>
+            <p>Paste a move log in the same format as “Copy to clipboard”.</p>
+            <textarea
+              className="replay-textarea"
+              value={replayText}
+              onChange={(e) => setReplayText(e.target.value)}
+              placeholder='[Chess960 "RQKRNBBN"]\n[Seed "123"]\n\n1. e2→e4  e7→e5\n2. A→B  g8→f6\n...'
+              rows={10}
+            />
+            {replayError && <div className="replay-error">{replayError}</div>}
+            <div className="replay-actions">
+              <button type="button" className="help-close-btn" onClick={importReplayFromNotation}>
+                Load replay
+              </button>
+              <button
+                type="button"
+                className="help-close-btn"
+                onClick={() => setShowReplayDialog(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <details className="move-log-details">
         <summary>Moves ({log.moves.length})</summary>
         <div className="move-log-content">
@@ -852,7 +1007,11 @@ function App() {
         </div>
       </details>
 
-      <MemoryPanel />
+      <MemoryPanel
+        onGameActivate={(g) => {
+          if (g.status === 'incomplete') resumeGame(g);
+        }}
+      />
 
       {showHelp && (
         <div className="help-backdrop" onClick={() => setShowHelp(false)}>

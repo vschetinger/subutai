@@ -133,7 +133,15 @@ export function GameCard({ game }: GameCardProps) {
   }
 
   const resultLabel =
-    game.result === 'win' ? 'Win' : game.result === 'loss' ? 'Loss' : 'Draw';
+    game.status === 'incomplete'
+      ? 'Incomplete'
+      : game.result === 'win'
+        ? 'Win'
+        : game.result === 'loss'
+          ? 'Loss'
+          : 'Draw';
+  const resultClass =
+    game.status === 'incomplete' ? 'incomplete' : (game.result ?? 'draw');
 
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
   const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
@@ -168,7 +176,7 @@ export function GameCard({ game }: GameCardProps) {
       <summary>
         <span className="memory-game-summary-left">
           <span className="memory-game-date">{formatDate(game.createdAt)}</span>
-          <span className={`memory-game-result memory-game-result-${game.result}`}>
+          <span className={`memory-game-result memory-game-result-${resultClass}`}>
             {resultLabel}
           </span>
           <span className="memory-game-config">{game.config960}</span>
@@ -246,7 +254,8 @@ export function GameCard({ game }: GameCardProps) {
           <div className="memory-game-stats-column">
             <div className="memory-game-summary">
               <div>
-                <strong>{game.config960}</strong> · {resultLabel} ({game.termination})
+                <strong>{game.config960}</strong> · {resultLabel}
+                {game.status === 'complete' && game.termination ? ` (${game.termination})` : ''}
                 · {game.moveCount} moves
               </div>
               <div className="memory-game-moves-ab">
