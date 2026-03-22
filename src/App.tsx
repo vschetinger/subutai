@@ -23,6 +23,7 @@ import { appendMove, createGameLog } from './recording/log';
 import { buildSavedGameFromLog, buildSavedGameSnapshot } from './memory/build';
 import { localStorageAdapter } from './memory/storage';
 import { MemoryPanel } from './memory/MemoryPanel';
+import { OraclePanel } from './oracle/OraclePanel';
 import type { SavedGame } from './memory/types';
 import { NotationParseError, parseMemoryNotation } from './memory/notation';
 
@@ -100,7 +101,7 @@ function App() {
 
     const sourceId = liveSavedGameIdRef.current;
     const saved = buildSavedGameFromLog(log, state, gameStatus, sourceId);
-    (localStorageAdapter.saveOrUpdateGame?.(saved) ?? localStorageAdapter.saveGame(saved));
+    void (localStorageAdapter.saveOrUpdateGame?.(saved) ?? localStorageAdapter.saveGame(saved));
 
     // Clean up the live snapshot so Memory shows one final entry.
     if (sourceId) {
@@ -116,7 +117,7 @@ function App() {
     const liveId = liveSavedGameIdRef.current;
     if (!liveId) return;
     const snapshot = buildSavedGameSnapshot(log, liveId);
-    (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
+    void (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
   }, [gameStatus, log]);
 
   function applyFormationCode() {
@@ -536,7 +537,7 @@ function App() {
 
       const id = `replay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const snapshot = buildSavedGameSnapshot(replayLog, id);
-      (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
+      void (localStorageAdapter.saveOrUpdateGame?.(snapshot) ?? localStorageAdapter.saveGame(snapshot));
 
       // Load into the board as an unfinished game so it can be continued.
       liveSavedGameIdRef.current = id;
@@ -1007,12 +1008,15 @@ function App() {
         </div>
       </details>
 
+      <OraclePanel state={state} lastMove={lastMove} />
+
       <MemoryPanel
         onGameActivate={(g) => {
           if (g.status === 'incomplete') resumeGame(g);
         }}
       />
 
+        //TODO: FIX the text
       {showHelp && (
         <div className="help-backdrop" onClick={() => setShowHelp(false)}>
           <div className="help-dialog" onClick={(e) => e.stopPropagation()}>
@@ -1031,6 +1035,11 @@ function App() {
               <li><em>Support map</em> (arrow button): shows which of your pieces are backed up by others (arrows from supporter to supported).</li>
               <li><em>Threat map</em> (warning button): tints squares the opponent attacks. Hover a threatened square to highlight the threatening pieces.</li>
               <li>The starting position is a random Chess960 arrangement.</li>
+              <li>
+                <em>I Ching (reading)</em>: optional symbolic counsel from the Book of Changes (Wilhelm-style
+                judgments). Use the slider to blend a small oracle bias into AI evaluation—or keep it at 0 for
+                human-only flavor text.
+              </li>
               <li>Standard chess rules apply: you cannot move into check, checkmate ends the game.</li>
             </ul>
             <p>

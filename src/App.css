@@ -973,3 +973,115 @@
 .help-close-btn:hover {
   background: #3a3a55;
 }
+
+/* I Ching oracle */
+
+.oracle-details {
+  margin-top: 12px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.oracle-details summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent-gold);
+}
+
+.oracle-content {
+  padding: 0 14px 14px;
+}
+
+.oracle-guardrail {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.oracle-blend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.oracle-blend-row input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+}
+
+.oracle-blend-val {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5em;
+}
+
+.oracle-max-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.oracle-dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .oracle-dual-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.oracle-side {
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.oracle-side-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.oracle-meta,
+.oracle-trigrams {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.oracle-quote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-teal, #0d9488);
+  font-size: 12px;
+  line-height: 1.45;
+  font-style: italic;
+  color: var(--text);
+}
+
+.oracle-tip {
+  font-size: 12px;
+  color: #c4b5fd;
+  margin: 0 0 8px;
+}
+
+.oracle-scores {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.oracle-scores dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

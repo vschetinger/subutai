@@ -1,4 +1,4 @@
-import type { Move } from '../engine';
+import type { Move, SquareId } from '../engine';
 
 export class NotationParseError extends Error {}
 
@@ -28,7 +28,7 @@ function parseMoveToken(tokenRaw: string): Move {
   if (!m) {
     throw new NotationParseError(`Unrecognized move token: "${tokenRaw}"`);
   }
-  return { from: m[1] as any, to: m[2] as any, kind: 'normal' };
+  return { from: m[1] as SquareId, to: m[2] as SquareId, kind: 'normal' };
 }
 
 export function parseMemoryNotation(notation: string): { config960: string; moves: Move[] } {

@@ -9,7 +9,9 @@
     "build:gh": "vite build",
     "deploy": "npm run build && gh-pages -d dist",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "exp:self-play": "tsx scripts/exp/run-self-play.ts",
+    "exp:summarize": "tsx scripts/exp/summarize.ts"
   },
   "dependencies": {
     "react": "^19.2.4",
@@ -28,6 +30,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
     "gh-pages": "^6.2.0",
+    "tsx": "^4.19.0",
     "vite": "^8.0.0"
   }
 }

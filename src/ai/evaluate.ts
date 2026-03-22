@@ -1,5 +1,7 @@
 import type { BoardState, Color, PieceType, SquareId, TopologyState } from '../engine/types';
 import { rayFrom, knightTargets } from '../engine/auxetic';
+import { getOracleEvalBlend } from '../oracle/config';
+import { oracleTacticalBias } from '../oracle/bias';
 
 export const PIECE_VALUE: Record<PieceType, number> = {
   pawn: 100,
@@ -23,6 +25,11 @@ export function evaluate(state: BoardState): number {
     const sign = piece.color === side ? 1 : -1;
     score += sign * PIECE_VALUE[piece.type];
     score += sign * pieceActivity(sq, piece.type, piece.color, topo, state.pieces);
+  }
+
+  const blend = getOracleEvalBlend();
+  if (blend > 0) {
+    score += blend * oracleTacticalBias(state, null);
   }
 
   return score;

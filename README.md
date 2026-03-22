@@ -1,3 +1,22 @@
+# subutai
+
+Auxetic Chess960 in the browser. Includes **Memory** (saved games), **replay-from-log**, and an optional **I Ching** reading layer (Wilhelm-style judgments + explicit trigram archetype scores). The oracle can optionally bias AI evaluation via a slider (blend 0 = tactics only).
+
+## Offline experiments (JSONL)
+
+Append-only shards under `data/shards/` (gitignored). Schema: `subutai.exp.v1` in `scripts/exp/schema.ts`.
+
+```bash
+npm run exp:self-play -- --games=10
+# optional: MAX_PLIES=120 SEARCH_MS=150 npx tsx scripts/exp/run-self-play.ts --games=5
+
+npm run exp:summarize -- data/shards/run-*.jsonl
+```
+
+Merge shards from collaborators: `cat a.jsonl b.jsonl > merged.jsonl`, then sort/dedupe by `sample_id` if needed.
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
